@@ -153,5 +153,4 @@ else:
     st.markdown("**Expected Data Format:**")
     st.markdown("- Excel (.xlsx) or CSV (.csv) file.")
     st.markdown("- Columns should include: 'Tanggal', 'Item', 'Qty (Normal)', 'Nett Sales (Normal)', 'Qty (Discount)', 'Nett Sales (Discount)', 'Total Qty', 'Total Nett Sales'.")
-    st.markdown("- For Excel files, assume header is in the second row (header=1).
-")
+    st.markdown("- For Excel files, assume header is in the second row (header=1).")
