@@ -41,5 +41,5 @@ Data minimal berisi:
 - Matplotlib
 - OpenPyXL
 
-## Struktur Folder
+
 
