@@ -3,11 +3,11 @@ import streamlit as st
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from scipy.cluster.hierarchy import linkage, fcluster
+import matplotlib.pyplot as plt
 
 # =========================
-# CONFIG + BACKGROUND
+# PAGE CONFIG & BACKGROUND
 # =========================
-
 st.set_page_config(layout="wide")
 
 page_bg = """
@@ -32,87 +32,151 @@ h1, h2, h3 {
 """
 st.markdown(page_bg, unsafe_allow_html=True)
 
-# =========================
-# TITLE
-# =========================
 
-st.title("SEGMENTASI PRODUK FASHION BERDASARKAN POLA PENJUALAN BULANAN")
-st.write("Kolom yang wajib ada: **Item | Qty | Sales**")
+st.title("📊 SEGMENTASI PRODUK FASHION")
+st.write("**Metode: K-Means & Hierarchical Clustering**")
+st.write("Kolom yang digunakan: `Item`, `Total Qty`, `Total Nett Sales`")
 
-# =========================
+# ===================================
 # UPLOAD DATA
-# =========================
+# ===================================
 
-file = st.file_uploader("Upload file Excel (kolom: Item, Qty, Sales)", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload File Excel / CSV", type=["xlsx", "csv"])
 
-if file is not None:
-    df = pd.read_excel(file)
+if uploaded_file is not None:
 
-    # =========================
-    # VALIDASI KOLOM
-    # =========================
+    # Read file
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-    required_cols = ["Item", "Qty", "Sales"]
+    st.subheader("✅ Data Asli (5 baris pertama)")
+    st.dataframe(df.head())
 
-    if not all(col in df.columns for col in required_cols):
-        st.error("❌ FILE HARUS ADA KOLOM: Item, Qty, Sales (sesuai nama ini)")
+    # ===================================
+    # CLEANING DATA
+    # ===================================
+
+    df.columns = df.columns.astype(str).str.strip()
+
+    needed_cols = ["Item", "Total Qty", "Total Nett Sales"]
+
+    if not all(col in df.columns for col in needed_cols):
+        st.error("❌ Kolom Wajib tidak ditemukan: Item, Total Qty, Total Nett Sales")
         st.stop()
 
-    df = df[["Item", "Qty", "Sales"]]
+    df = df[needed_cols].copy()
 
-    st.subheader("✅ DATA TERBACA")
-    st.dataframe(df.head(10), use_container_width=True)
+    df["Item"] = df["Item"].astype(str).str.strip().str.upper()
+    df = df[df["Item"] != "NAN"]
+    df = df[df["Item"] != ""]
+    df = df[~df["Item"].str.contains("TOTAL", na=False)]
 
-    # =========================
-    # CLUSTERING
-    # =========================
+    # Bersihkan angka
+    df["Total Qty"] = df["Total Qty"].astype(str).str.replace(",", "").str.strip()
+    df["Total Nett Sales"] = df["Total Nett Sales"].astype(str).str.replace(",", "").str.strip()
 
-    X = df[["Qty","Sales"]]
+    df["Total Qty"] = pd.to_numeric(df["Total Qty"], errors="coerce").fillna(0)
+    df["Total Nett Sales"] = pd.to_numeric(df["Total Nett Sales"], errors="coerce").fillna(0)
+
+    df = df.groupby("Item", as_index=False).agg({
+        "Total Qty": "sum",
+        "Total Nett Sales": "sum"
+    })
+
+    df = df.rename(columns={
+        "Total Qty": "Qty",
+        "Total Nett Sales": "Sales"
+    })
+
+    st.subheader("✅ Data Setelah Dibersihkan")
+    st.dataframe(df)
+
+    if len(df) < 3:
+        st.error("Data terlalu sedikit untuk clustering (minimal 3 produk diperlukan)")
+        st.stop()
+
+    # ===================================
+    # SCALING
+    # ===================================
+
+    X = df[["Qty", "Sales"]]
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # KMeans
+    # ===================================
+    # KMEANS CLUSTERING
+    # ===================================
+
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
     df["KMeans_Cluster"] = kmeans.fit_predict(X_scaled)
 
-    # Hierarchical
-    Z = linkage(X_scaled, method='ward')
-    df["Hierarchical_Cluster"] = fcluster(Z, 3, criterion='maxclust')
+    # ===================================
+    # HIERARCHICAL CLUSTERING
+    # ===================================
 
-    # =========================
-    # HASIL
-    # =========================
+    linked = linkage(X_scaled, method="ward")
+    df["Hierarchical_Cluster"] = fcluster(linked, t=3, criterion='maxclust')
 
-    st.subheader("✅ HASIL SEGMENTASI PER ARTIKEL")
+    # ===================================
+    # HASIL AKHIR
+    # ===================================
 
-    st.dataframe(df, use_container_width=True, height=600)
+    st.subheader("✅ HASIL SEGMENTASI PRODUK")
+    st.dataframe(df)
 
-    # =========================
-    # RINGKASAN CLUSTER
-    # =========================
+    # ===================================
+    # VISUALISASI KMEANS
+    # ===================================
 
-    st.subheader("📊 JUMLAH DATA PER CLUSTER")
+    st.subheader("📈 Visualisasi K-Means Clustering")
 
-    col1, col2 = st.columns(2)
+    fig1, ax1 = plt.subplots()
+    scatter1 = ax1.scatter(df["Qty"], df["Sales"], c=df["KMeans_Cluster"])
 
-    with col1:
-        st.write("KMEANS")
-        st.write(df["KMeans_Cluster"].value_counts().sort_index())
+    for i, txt in enumerate(df["Item"]):
+        ax1.annotate(txt, (df["Qty"][i], df["Sales"][i]), fontsize=7)
 
-    with col2:
-        st.write("HIERARCHICAL")
-        st.write(df["Hierarchical_Cluster"].value_counts().sort_index())
+    ax1.set_xlabel("Total Quantity")
+    ax1.set_ylabel("Total Sales")
+    ax1.set_title("K-Means Clustering")
 
-    # =========================
-    # DOWNLOAD
-    # =========================
+    st.pyplot(fig1)
 
-    df.to_excel("HASIL_SEGMENTASI.xlsx", index=False)
-    st.success("✅ File berhasil disimpan sebagai: HASIL_SEGMENTASI.xlsx")
+    # ===================================
+    # VISUALISASI HIERARCHICAL
+    # ===================================
+
+    st.subheader("📈 Visualisasi Hierarchical Clustering")
+
+    fig2, ax2 = plt.subplots()
+    scatter2 = ax2.scatter(df["Qty"], df["Sales"], c=df["Hierarchical_Cluster"])
+
+    for i, txt in enumerate(df["Item"]):
+        ax2.annotate(txt, (df["Qty"][i], df["Sales"][i]), fontsize=7)
+
+    ax2.set_xlabel("Total Quantity")
+    ax2.set_ylabel("Total Sales")
+    ax2.set_title("Hierarchical Clustering")
+
+    st.pyplot(fig2)
+
+    # ===================================
+    # DOWNLOAD RESULT
+    # ===================================
+
+    st.subheader("⬇ Download Hasil Segmentasi")
+    st.download_button(
+        "Download Excel",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name="hasil_segmentasi_produk.csv",
+        mime="text/csv"
+    )
 
 else:
-    st.warning("⏳ Upload file Excel dulu...")
-
+    st.warning("Silakan upload file data terlebih dahulu")
 
 
 
