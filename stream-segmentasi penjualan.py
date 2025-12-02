@@ -1,9 +1,12 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans, AgglomerativeClustering
 
-# ===============================
-# BACKGROUND & STYLE
-# ===============================
+st.set_page_config(page_title="Segmentasi Produk Fashion", layout="wide")
+
+# ===================== BACKGROUND ======================
 page_bg = """
 <style>
 [data-testid="stAppViewContainer"] {
@@ -26,110 +29,186 @@ h1, h2, h3 {
 """
 st.markdown(page_bg, unsafe_allow_html=True)
 
-# ===============================
-# TITLE
-# ===============================
-st.title("📊 Segmentasi Penjualan Produk Fashion")
-st.write("Upload file Excel/CSV dengan data penjualan kamu")
+# ===================== TITLE ======================
+st.title("📊 Segmentasi Produk Fashion Berdasarkan Pola Penjualan Bulanan")
+st.write("Metode: **K-Means & Hierarchical Clustering**")
 
-# ===============================
-# UPLOAD FILE
-# ===============================
-file = st.file_uploader("Upload file (.xlsx / .csv)", type=["csv", "xlsx"])
+# ==============================
+# UPLOAD DATA
+# ==============================
+uploaded_file = st.file_uploader("Upload file Excel atau CSV", type=["xlsx", "csv"])
 
-if file is not None:
+if uploaded_file is not None:
 
-    # Baca file
-    if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
+    # ---- Baca file ----
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
     else:
-        df = pd.read_excel(file)
+        df = pd.read_excel(uploaded_file)
 
-    st.subheader("📄 Kolom terdeteksi di file kamu:")
-    st.write(list(df.columns))
+    st.subheader("📌 Preview Data")
+    st.dataframe(df.head())
 
-    # ===============================
-    # NORMALISASI NAMA KOLOM
-    # ===============================
-    column_mapping = {}
+    # ==============================
+    # AUTO DETECT COLUMN
+    # ==============================
+    col_item = None
+    col_qty = None
+    col_sales = None
 
     for col in df.columns:
-        if "tgl" in col.lower() or "tanggal" in col.lower() or "date" in col.lower():
-            column_mapping[col] = "Tanggal"
-        if "item" in col.lower() or "produk" in col.lower() or "product" in col.lower():
-            column_mapping[col] = "Item"
-        if "qty" in col.lower() or "jumlah" in col.lower():
-            column_mapping[col] = "Qty"
-        if "total" in col.lower() or "sales" in col.lower() or "net" in col.lower():
-            column_mapping[col] = "Total Sales"
+        if "item" in col.lower() or "produk" in col.lower() or "artikel" in col.lower():
+            col_item = col
+        if "qty" in col.lower() or "jumlah" in col.lower() or "unit" in col.lower():
+            col_qty = col
+        if "total" in col.lower() or "sales" in col.lower() or "penjualan" in col.lower() or "nett" in col.lower():
+            col_sales = col
 
-    df.rename(columns=column_mapping, inplace=True)
+    if col_item is None or col_qty is None or col_sales is None:
+        st.error("❌ Kolom tidak terdeteksi otomatis. Pastikan file punya:")
+        st.write("- Item / Produk")
+        st.write("- Qty / Jumlah")
+        st.write("- Total Sales / Penjualan")
+        st.stop()
 
-    # ===============================
-    # CEK KOLOM WAJIB
-    # ===============================
-    required_cols = ["Tanggal", "Item", "Qty", "Total Sales"]
+    df = df[[col_item, col_qty, col_sales]]
+    df.columns = ["Item", "Qty", "Sales"]
 
-    if all(col in df.columns for col in required_cols):
+    # ==============================
+    # CLEANING DATA
+    # ==============================
+    df["Item"] = df["Item"].astype(str).str.upper().str.strip()
+    df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
+    df["Sales"] = pd.to_numeric(df["Sales"], errors="coerce").fillna(0)
 
-        df = df[required_cols]
+    # Gabungkan per produk
+    data_produk = df.groupby("Item").agg({
+        "Qty": "sum",
+        "Sales": "sum"
+    }).reset_index()
 
-        # Pastikan numerik
-        df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce")
-        df["Total Sales"] = pd.to_numeric(df["Total Sales"], errors="coerce")
+    st.subheader("📦 Data per Produk")
+    st.dataframe(data_produk)
 
-        # ===============================
-        # SEGMENTASI PRODUK
-        # ===============================
-        def segmentasi(item):
-            item = str(item).lower()
+    # ==============================
+    # NORMALIZATION
+    # ==============================
+    X = data_produk[["Qty", "Sales"]]
 
-            if "woman" in item or "wanita" in item or "wm" in item or "girls" in item:
-                return "WOMEN"
-            elif "man" in item or "men" in item or "pria" in item:
-                return "MEN"
-            elif "kid" in item or "anak" in item:
-                return "KIDS"
-            elif "shoe" in item or "sepatu" in item:
-                return "FOOTWEAR"
-            elif "bag" in item or "tas" in item:
-                return "BAG"
-            else:
-                return "LAINNYA"
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-        df["Segmen"] = df["Item"].apply(segmentasi)
+    # ==============================
+    # K-MEANS CLUSTERING
+    # ==============================
+    k = st.slider("Jumlah Cluster (K-Means & Hierarchical)", 2, 8, 3)
 
-        st.success("✅ Data berhasil dibaca & disegmentasi")
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    data_produk["Cluster_KMeans"] = kmeans.fit_predict(X_scaled)
 
-        # ===============================
-        # SHOW DATA
-        # ===============================
-        st.subheader("📌 Data Setelah Segmentasi")
-        st.dataframe(df, use_container_width=True)
+    # ==============================
+    # HIERARCHICAL CLUSTERING
+    # ==============================
+    hc = AgglomerativeClustering(n_clusters=k)
+    data_produk["Cluster_Hierarchical"] = hc.fit_predict(X_scaled)
 
-        # ===============================
-        # REKAP SEGMENTASI
-        # ===============================
-        seg_summary = df.groupby("Segmen").agg({
-            "Qty": "sum",
-            "Total Sales": "sum"
-        }).reset_index()
+    # ==============================
+    # LABEL SEGMENTASI
+    # ==============================
+    def label_cluster(x):
+        if x == 0:
+            return "Kurang Laris"
+        elif x == 1:
+            return "Sedang"
+        else:
+            return "Paling Laris"
 
-        st.subheader("📊 Rekap Segmentasi")
-        st.dataframe(seg_summary, use_container_width=True)
+    data_produk["Label_KMeans"] = data_produk["Cluster_KMeans"].apply(label_cluster)
+    data_produk["Label_Hierarchical"] = data_produk["Cluster_Hierarchical"].apply(label_cluster)
 
-        # ===============================
-        # DOWNLOAD
-        # ===============================
-        st.download_button(
-            "⬇️ Download hasil segmentasi (Excel)",
-            data=df.to_csv(index=False).encode("utf-8"),
-            file_name="hasil_segmentasi.csv",
-            mime="text/csv"
-        )
+    # ==============================
+    # RESULT
+    # ==============================
+    st.subheader("✅ Hasil Segmentasi Produk (SEMUA TERBACA)")
+    st.dataframe(data_produk)
 
-    else:
-        st.error("❌ File kamu belum memiliki semua kolom penting")
-        st.warning("Kolom wajib: Tanggal, Item, Qty, Total Sales")
-        st.info("Silakan sesuaikan nama kolom di file Excel kamu")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("📊 Ringkasan K-Means")
+        st.dataframe(data_produk["Cluster_KMeans"].value_counts().reset_index())
+
+    with col2:
+        st.subheader("📊 Ringkasan Hierarchical")
+        st.dataframe(data_produk["Cluster_Hierarchical"].value_counts().reset_index())
+
+    # ==============================
+    # DOWNLOAD RESULT
+    # ==============================
+    st.subheader("⬇ Download hasil segmentasi")
+
+    csv = data_produk.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        "Download hasil sebagai CSV",
+        data=csv,
+        file_name="hasil_segmentasi_produk.csv",
+        mime="text/csv"
+    )
+
+else:
+    st.info("Silakan upload file data penjualan untuk mulai segmentasi.")
+    st.markdown("Pastikan file memiliki kolom: **Item / Produk, Qty, Total Sales**")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
