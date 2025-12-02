@@ -1,156 +1,147 @@
-
 import streamlit as st
 import pandas as pd
-import numpy as np
-import joblib
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from scipy.cluster.hierarchy import dendrogram, linkage
 
-# --- 1. Load the trained scaler and KMeans model ---
-try:
-    scaler = joblib.load('scaler.pkl')
-    kmeans = joblib.load('kmeans_model.pkl')
-    st.success("Scaler and KMeans model loaded successfully.")
-except FileNotFoundError:
-    st.error("Error: scaler.pkl or kmeans_model.pkl not found. Please ensure they are in the same directory as this script.")
-    st.stop()
+# ======================
+# JUDUL APLIKASI
+# ======================
+st.set_page_config(layout="wide")
+st.title("SEGMENTASI PRODUK FASHION BERDASARKAN POLA PENJUALAN BULANAN")
+st.markdown("### Metode K-Means & Hierarchical Clustering")
 
-# --- 2. Define a function to preprocess new data and predict clusters ---
-def predict_product_clusters(new_sales_data_df):
-    '''Processes new monthly sales data for products and predicts their clusters.
-
-    Args:
-        new_sales_data_df (pd.DataFrame): A DataFrame containing new sales data.
-                                           Expected columns: 'Tanggal', 'Item', 'Qty (Normal)',
-                                           'Nett Sales (Normal)', 'Qty (Discount)',
-                                           'Nett Sales (Discount)', 'Total Qty', 'Total Nett Sales'.
-
-    Returns:
-        pd.DataFrame: A DataFrame with product items and their predicted K-Means clusters.
-    '''
-    df_processed = new_sales_data_df.copy()
-
-    # Basic cleaning steps (similar to notebook)
-    df_processed.columns = df_processed.columns.astype(str)
-    df_processed = df_processed.loc[:, ~df_processed.columns.str.contains('Unnamed')]
-    df_processed['Tanggal'] = pd.to_datetime(df_processed['Tanggal'], errors='coerce')
-    df_processed = df_processed.dropna(subset=['Tanggal'])
-    df_processed['Month'] = df_processed['Tanggal'].dt.month
-
-    numerical_cols_to_clean = [
-        'Qty (Normal)', 'Nett Sales (Normal)', 'Qty (Discount)',
-        'Nett Sales (Discount)', 'Total Qty', 'Total Nett Sales'
-    ]
-    for col in numerical_cols_to_clean:
-        if col in df_processed.columns:
-            df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0)
-            df_processed[col] = df_processed[col].apply(lambda x: max(x, 0))
-
-    # Clean 'Item' column
-    items_to_remove = ['Total', 'Item', 'Qty', 'MARKETING', 'SHOECARE']
-    df_processed = df_processed[~df_processed['Item'].isin(items_to_remove)].copy()
-    df_processed['Item'] = df_processed['Item'].astype(str).str.upper().str.strip()
-    item_mapping = {
-        'WMNFLATS': 'WMNFLAT',
-        'WMNFLAT': 'WMNFLAT',
-        'WMNFL.AT': 'WMNFLAT',
-        'MENSANOAL': 'MENSANDAL',
-        'MEMBAGS': 'MENBAGS',
-        'MEMBELT': 'MENBELT',
-        'WMNBA GS': 'WMNBAGS',
-        'WlNHEELS': 'WMNHEELS',
-        'WLNHEELS': 'WMNHEELS',
-        'MENSFORMAL': 'MENFORMAL'
-    }
-    df_processed['Item'] = df_processed['Item'].replace(item_mapping)
-
-    # Aggregate the new data to get monthly sales and quantity per item
-    df_monthly_sales_new = df_processed.groupby(['Item', 'Month']).agg(
-        total_nett_sales=('Total Nett Sales', 'sum'),
-        total_qty=('Total Qty', 'sum')
-    ).reset_index()
-
-    # Pivot the data to create features similar to the training data
-    df_sales_pivot_new = df_monthly_sales_new.pivot_table(
-        index='Item', columns='Month', values='total_nett_sales', fill_value=0
-    )
-    df_sales_pivot_new.columns = [f'Sales_Month_{col}' for col in df_sales_pivot_new.columns]
-
-    df_qty_pivot_new = df_monthly_sales_new.pivot_table(
-        index='Item', columns='Month', values='total_qty', fill_value=0
-    )
-    df_qty_pivot_new.columns = [f'Qty_Month_{col}' for col in df_qty_pivot_new.columns]
-
-    # Merge sales and quantity features
-    # Use df_sales_pivot_new.index as the base to ensure all items are included
-    all_items = df_sales_pivot_new.index.union(df_qty_pivot_new.index)
-    df_features_new = pd.DataFrame(index=all_items)
-    df_features_new = df_features_new.merge(df_sales_pivot_new, left_index=True, right_index=True, how='left')
-    df_features_new = df_features_new.merge(df_qty_pivot_new, left_index=True, right_index=True, how='left')
-    df_features_new = df_features_new.fillna(0) # Fill NaN if a month is missing for Qty/Sales
-
-    # Ensure all original month columns are present, fill with 0 if not
-    # These months were observed during training (1, 2, 3, 4, 9, 11)
-    original_months = [1, 2, 3, 4, 9, 11]
-    training_feature_names = [
-        f'Sales_Month_{m}' for m in original_months
-    ] + [
-        f'Qty_Month_{m}' for m in original_months
-    ]
-
-    for col in training_feature_names:
-        if col not in df_features_new.columns:
-            df_features_new[col] = 0
-    
-    # Reorder columns to match the order used during training (important for scaler)
-    # Filter to only include columns used in training
-    df_features_for_scaling = df_features_new[training_feature_names]
-
-    # Scale the features
-    df_scaled_features_new = scaler.transform(df_features_for_scaling)
-
-    # Predict clusters
-    new_clusters = kmeans.predict(df_scaled_features_new)
-
-    # Assign clusters back to items
-    df_results = pd.DataFrame({'Item': df_features_new.index, 'Predicted_Cluster': new_clusters})
-    return df_results
-
-# --- Streamlit App --- 
-st.set_page_config(page_title="Product Segmentation App", layout="wide")
-st.title("🛍️ Product Sales Segmentation")
-st.write("Upload your new monthly sales data to get product cluster predictions.")
-
-st.sidebar.header("Upload Data")
-uploaded_file = st.sidebar.file_uploader("Choose an Excel or CSV file", type=["xlsx", "csv"])
+# ======================
+# UPLOAD DATA
+# ======================
+st.subheader("1. Upload Data Penjualan")
+uploaded_file = st.file_uploader("Upload file Excel atau CSV", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            new_data_df = pd.read_csv(uploaded_file)
+
+    # ======================
+    # READ FILE
+    # ======================
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file, header=1)
+
+    st.success("✅ File berhasil di-upload")
+
+    # ======================
+    # DATA CLEANING
+    # ======================
+    df = df[['Tanggal', 'Item', 'Total Qty', 'Total Nett Sales']]
+    df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+    df = df.dropna()
+
+    # Pastikan SEMUA produk (MEN + WM) terbaca
+    df['Item'] = df['Item'].astype(str).str.upper().str.strip()
+
+    df['Bulan'] = df['Tanggal'].dt.month
+
+    st.subheader("2. Data Bersih")
+    st.dataframe(df.head())
+
+    # ======================
+    # AGREGASI BULANAN
+    # ======================
+    monthly_sales = df.groupby(['Item', 'Bulan']).agg({
+        'Total Qty': 'sum',
+        'Total Nett Sales': 'sum'
+    }).reset_index()
+
+    st.subheader("3. Total Penjualan Bulanan Per Produk")
+    st.dataframe(monthly_sales)
+
+    # ======================
+    # PIVOT TABLE
+    # ======================
+    pivot = monthly_sales.pivot_table(
+        index='Item',
+        columns='Bulan',
+        values='Total Qty',
+        fill_value=0
+    )
+
+    st.subheader("4. Pola Penjualan Bulanan (Pivot)")
+    st.dataframe(pivot)
+
+    # ======================
+    # NORMALISASI
+    # ======================
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(pivot)
+
+    # ======================
+    # K-MEANS
+    # ======================
+    st.subheader("5. K-Means Clustering")
+
+    k = st.slider("Pilih jumlah cluster", 2, 8, 4)
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    clusters = kmeans.fit_predict(X_scaled)
+
+    pivot['Segment (KMeans)'] = clusters
+
+    # ======================
+    # MEMBERI LABEL SEGMENT
+    # ======================
+    total_per_produk = df.groupby('Item')['Total Qty'].sum()
+
+    pivot['Total_Penjualan'] = total_per_produk
+    pivot = pivot.sort_values(by='Total_Penjualan', ascending=False)
+
+    def beri_label(cluster):
+        if cluster == 0:
+            return "LOW SALES"
+        elif cluster == 1:
+            return "MEDIUM SALES"
+        elif cluster == 2:
+            return "HIGH SALES"
         else:
-            new_data_df = pd.read_excel(uploaded_file, header=1) # Assuming same header as training data
-        
-        st.sidebar.success("File uploaded successfully!")
-        st.subheader("Raw Data Preview (First 5 rows)")
-        st.dataframe(new_data_df.head())
+            return "VERY HIGH SALES"
 
-        st.subheader("Predicting Product Clusters...")
-        predictions_df = predict_product_clusters(new_data_df)
-        
-        st.subheader("Predicted Clusters")
-        st.dataframe(predictions_df)
+    pivot['Keterangan Segment'] = pivot['Segment (KMeans)'].apply(beri_label)
 
-        st.subheader("Cluster Summary")
-        cluster_counts = predictions_df['Predicted_Cluster'].value_counts().reset_index()
-        cluster_counts.columns = ['Cluster', 'Number of Products']
-        st.dataframe(cluster_counts)
+    st.subheader("6. HASIL SEGMENTASI PRODUK (Semua Produk)")
+    st.dataframe(pivot)
 
-    except Exception as e:
-        st.error(f"Error processing file: {e}")
-        st.write("Please ensure your file has the correct format and columns, similar to the training data.")
-        st.write("Expected columns: 'Tanggal', 'Item', 'Qty (Normal)', 'Nett Sales (Normal)', 'Qty (Discount)', 'Nett Sales (Discount)', 'Total Qty', 'Total Nett Sales'")
-else:
-    st.info("Please upload a sales data file to get predictions.")
-    st.markdown("**Expected Data Format:**")
-    st.markdown("- Excel (.xlsx) or CSV (.csv) file.")
-    st.markdown("- Columns should include: 'Tanggal', 'Item', 'Qty (Normal)', 'Nett Sales (Normal)', 'Qty (Discount)', 'Nett Sales (Discount)', 'Total Qty', 'Total Nett Sales'.")
-    st.markdown("- For Excel files, assume header is in the second row (header=1).")
+    # ======================
+    # VISUALISASI
+    # ======================
+    st.subheader("7. Visualisasi Segmentasi (K-Means)")
+
+    fig1, ax1 = plt.subplots(figsize=(12,5))
+    ax1.scatter(pivot.index, pivot['Total_Penjualan'])
+    plt.xticks(rotation=90)
+    plt.ylabel("Total Penjualan")
+    plt.xlabel("Produk")
+    st.pyplot(fig1)
+
+    # ======================
+    # HIERARCHICAL CLUSTERING
+    # ======================
+    st.subheader("8. Hierarchical Clustering")
+
+    linked = linkage(X_scaled, method='ward')
+
+    fig2, ax2 = plt.subplots(figsize=(15, 6))
+    dendrogram(
+        linked,
+        labels=pivot.index.tolist(),
+        leaf_rotation=90
+    )
+    st.pyplot(fig2)
+
+    # ======================
+    # DOWNLOAD HASIL
+    # ======================
+    st.subheader("9. Download Hasil Segmentasi")
+
+    output = pivot.reset_index()
+    csv = output.to_csv(index=False).encode('utf-8')
+
+    st.do
