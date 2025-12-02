@@ -51,7 +51,7 @@ if uploaded_file is not None:
     else:
         df = pd.read_excel(uploaded_file)
 
-    st.subheader("✅ Data Asli (5 baris pertama)")
+    st.subheader("✅ Data Asli (15 baris pertama)")
     st.dataframe(df.head())
 
     # ===================================
@@ -177,52 +177,3 @@ if uploaded_file is not None:
 
 else:
     st.warning("Silakan upload file data terlebih dahulu")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
