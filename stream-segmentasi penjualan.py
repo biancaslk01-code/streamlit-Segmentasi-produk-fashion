@@ -1,150 +1,135 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from scipy.cluster.hierarchy import dendrogram, linkage
 
-# ----- BACKGROUND COLOR -----
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background: linear-gradient(to right, #4b6cb7, #182848);
-        color: white;
-    }
-    .stDataFrame {
-        background-color: white;
-    }
-    h1, h2, h3, h4, h5 {
-        color: white !important;
-    }
-    .css-1d391kg, .css-1v3fvcr {
-        background-color: white;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# ===============================
+# BACKGROUND & STYLE
+# ===============================
+page_bg = """
+<style>
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(120deg, #fce7f3, #e0f2fe, #ffffff);
+}
+[data-testid="stHeader"] {
+    background: rgba(0,0,0,0);
+}
+h1, h2, h3 {
+    color: #0f172a;
+    font-family: 'Arial';
+}
+.stButton>button {
+    background-color: #0f172a;
+    color: white;
+    border-radius: 10px;
+    padding: 10px 20px;
+}
+</style>
+"""
+st.markdown(page_bg, unsafe_allow_html=True)
 
-st.title("SEGMENTASI PRODUK FASHION BERDASARKAN POLA PENJUALAN BULANAN")
-st.markdown("### Metode K-Means & Hierarchical Clustering")
+# ===============================
+# TITLE
+# ===============================
+st.title("📊 Segmentasi Penjualan Produk Fashion")
+st.write("Upload file Excel/CSV dengan data penjualan kamu")
 
-st.subheader("1. Upload Data Penjualan")
-uploaded_file = st.file_uploader("Upload file Excel atau CSV", type=["csv", "xlsx"])
+# ===============================
+# UPLOAD FILE
+# ===============================
+file = st.file_uploader("Upload file (.xlsx / .csv)", type=["csv", "xlsx"])
 
-if uploaded_file is not None:
+if file is not None:
 
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
+    # Baca file
+    if file.name.endswith(".csv"):
+        df = pd.read_csv(file)
     else:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(file)
 
-    st.write("📌 Kolom yang terdeteksi:")
-    st.write(df.columns.tolist())
+    st.subheader("📄 Kolom terdeteksi di file kamu:")
+    st.write(list(df.columns))
 
-    # NORMALISASI FORMAT NAMA KOLOM
-    df.columns = df.columns.str.strip().str.lower()
-
-    # MAPPING NAMA KOLOM
-    column_map = {}
+    # ===============================
+    # NORMALISASI NAMA KOLOM
+    # ===============================
+    column_mapping = {}
 
     for col in df.columns:
-        if 'tanggal' in col or 'date' in col:
-            column_map['tanggal'] = col
-        elif 'item' in col or 'produk' in col or 'nama' in col:
-            column_map['item'] = col
-        elif 'total qty' in col or 'qty' in col:
-            column_map['total qty'] = col
-        elif 'nett' in col or 'sales' in col or 'penjualan' in col:
-            column_map['total nett sales'] = col
+        if "tgl" in col.lower() or "tanggal" in col.lower() or "date" in col.lower():
+            column_mapping[col] = "Tanggal"
+        if "item" in col.lower() or "produk" in col.lower() or "product" in col.lower():
+            column_mapping[col] = "Item"
+        if "qty" in col.lower() or "jumlah" in col.lower():
+            column_mapping[col] = "Qty"
+        if "total" in col.lower() or "sales" in col.lower() or "net" in col.lower():
+            column_mapping[col] = "Total Sales"
 
-    try:
-        df = df[
-            [
-                column_map['tanggal'],
-                column_map['item'],
-                column_map['total qty'],
-                column_map['total nett sales']
-            ]
-        ]
+    df.rename(columns=column_mapping, inplace=True)
 
-        df.columns = ['Tanggal', 'Item', 'Total Qty', 'Total Nett Sales']
+    # ===============================
+    # CEK KOLOM WAJIB
+    # ===============================
+    required_cols = ["Tanggal", "Item", "Qty", "Total Sales"]
 
-    except:
-        st.error("Kolom tidak dikenali. Pastikan ada kolom Tanggal, Item, Qty, dan Total Sales")
-        st.stop()
+    if all(col in df.columns for col in required_cols):
 
-    df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-    df = df.dropna()
-    df['Item'] = df['Item'].astype(str).str.upper().str.strip()
-    df['Bulan'] = df['Tanggal'].dt.month
+        df = df[required_cols]
 
-    st.subheader("2. Data setelah dibersihkan")
-    st.dataframe(df.head())
+        # Pastikan numerik
+        df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce")
+        df["Total Sales"] = pd.to_numeric(df["Total Sales"], errors="coerce")
 
-    # AGREGASI
-    monthly_sales = df.groupby(['Item', 'Bulan']).agg({
-        'Total Qty': 'sum',
-        'Total Nett Sales': 'sum'
-    }).reset_index()
+        # ===============================
+        # SEGMENTASI PRODUK
+        # ===============================
+        def segmentasi(item):
+            item = str(item).lower()
 
-    st.subheader("3. Penjualan Bulanan")
-    st.dataframe(monthly_sales)
+            if "woman" in item or "wanita" in item or "wm" in item or "girls" in item:
+                return "WOMEN"
+            elif "man" in item or "men" in item or "pria" in item:
+                return "MEN"
+            elif "kid" in item or "anak" in item:
+                return "KIDS"
+            elif "shoe" in item or "sepatu" in item:
+                return "FOOTWEAR"
+            elif "bag" in item or "tas" in item:
+                return "BAG"
+            else:
+                return "LAINNYA"
 
-    pivot = monthly_sales.pivot_table(
-        index='Item',
-        columns='Bulan',
-        values='Total Qty',
-        fill_value=0
-    )
+        df["Segmen"] = df["Item"].apply(segmentasi)
 
-    st.subheader("4. Pivot Table")
-    st.dataframe(pivot)
+        st.success("✅ Data berhasil dibaca & disegmentasi")
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(pivot)
+        # ===============================
+        # SHOW DATA
+        # ===============================
+        st.subheader("📌 Data Setelah Segmentasi")
+        st.dataframe(df, use_container_width=True)
 
-    st.subheader("5. K-Means Clustering")
+        # ===============================
+        # REKAP SEGMENTASI
+        # ===============================
+        seg_summary = df.groupby("Segmen").agg({
+            "Qty": "sum",
+            "Total Sales": "sum"
+        }).reset_index()
 
-    k = st.slider("Jumlah cluster", 2, 6, 3)
-    kmeans = KMeans(n_clusters=k, random_state=42)
-    pivot['Cluster'] = kmeans.fit_predict(X_scaled)
+        st.subheader("📊 Rekap Segmentasi")
+        st.dataframe(seg_summary, use_container_width=True)
 
-    total_jual = df.groupby('Item')['Total Qty'].sum()
-    pivot['Total Penjualan'] = total_jual
+        # ===============================
+        # DOWNLOAD
+        # ===============================
+        st.download_button(
+            "⬇️ Download hasil segmentasi (Excel)",
+            data=df.to_csv(index=False).encode("utf-8"),
+            file_name="hasil_segmentasi.csv",
+            mime="text/csv"
+        )
 
-    def label_cluster(x):
-        if x == 0:
-            return "LOW SALES"
-        elif x == 1:
-            return "MEDIUM SALES"
-        elif x == 2:
-            return "HIGH SALES"
-        else:
-            return "VERY HIGH SALES"
+    else:
+        st.error("❌ File kamu belum memiliki semua kolom penting")
+        st.warning("Kolom wajib: Tanggal, Item, Qty, Total Sales")
+        st.info("Silakan sesuaikan nama kolom di file Excel kamu")
 
-    pivot['Segment'] = pivot['Cluster'].apply(label_cluster)
-
-    st.subheader("✅ HASIL SEGMENTASI SEMUA PRODUK (MEN + WM + DLL)")
-    st.dataframe(pivot)
-
-    st.subheader("6. Visualisasi")
-    fig, ax = plt.subplots(figsize=(12,5))
-    ax.bar(pivot.index, pivot['Total Penjualan'])
-    plt.xticks(rotation=90)
-    plt.title("Total Penjualan per Produk")
-    st.pyplot(fig)
-
-    st.subheader("7. Hierarchical Clustering")
-
-    linked = linkage(X_scaled, method='ward')
-
-    fig2, ax2 = plt.subplots(figsize=(15, 5))
-    dendrogram(linked, labels=pivot.index.tolist(), leaf_rotation=90)
-    st.pyplot(fig2)
-
-    st.success("🎉 Segmentasi Produk Berhasil!")
-
-else:
-    st.info("Silakan upload file penjualan terlebih dahulu")
