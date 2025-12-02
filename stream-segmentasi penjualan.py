@@ -5,7 +5,7 @@ from sklearn.preprocessing import StandardScaler
 from scipy.cluster.hierarchy import linkage, fcluster
 
 # =========================
-# PAGE SETTING + BACKGROUND
+# CONFIG + BACKGROUND
 # =========================
 
 st.set_page_config(layout="wide")
@@ -30,104 +30,88 @@ h1, h2, h3 {
 }
 </style>
 """
-
 st.markdown(page_bg, unsafe_allow_html=True)
 
 # =========================
-# JUDUL
+# TITLE
 # =========================
 
-st.title("SEGMENTASI ARTIKEL PRODUK (MEN & WOMEN)")
-st.write("File harus bernama **data.xlsx** dan punya minimal 2 kolom numerik (Qty & Sales / Revenue / Harga).")
+st.title("SEGMENTASI PRODUK FASHION BERDASARKAN POLA PENJUALAN BULANAN")
+st.write("Kolom yang wajib ada: **Item | Qty | Sales**")
 
 # =========================
-# LOAD DATA
+# UPLOAD DATA
 # =========================
 
-try:
-    df = pd.read_excel("data.xlsx")
-except:
-    st.error("❌ File data.xlsx tidak ditemukan. Simpan file kamu dengan nama **data.xlsx** dulu.")
-    st.stop()
+file = st.file_uploader("Upload file Excel (kolom: Item, Qty, Sales)", type=["xlsx"])
 
-st.subheader("✅ KOLOM YANG TERBACA DARI FILE:")
-st.write(list(df.columns))
+if file is not None:
+    df = pd.read_excel(file)
 
-# =========================
-# AMBIL KOLOM ANGKA
-# =========================
+    # =========================
+    # VALIDASI KOLOM
+    # =========================
 
-num_df = df.select_dtypes(include=['int64','float64'])
+    required_cols = ["Item", "Qty", "Sales"]
 
-if num_df.shape[1] < 2:
-    st.error("❌ HARUS ADA MINIMAL 2 KOLOM ANGKA (contoh: Qty & Sales)")
-    st.stop()
+    if not all(col in df.columns for col in required_cols):
+        st.error("❌ FILE HARUS ADA KOLOM: Item, Qty, Sales (sesuai nama ini)")
+        st.stop()
 
-# Ambil 2 kolom numerik pertama untuk clustering
-X = num_df.iloc[:, :2]
+    df = df[["Item", "Qty", "Sales"]]
 
-# =========================
-# STANDARDISASI
-# =========================
+    st.subheader("✅ DATA TERBACA")
+    st.dataframe(df.head(10), use_container_width=True)
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+    # =========================
+    # CLUSTERING
+    # =========================
 
-# =========================
-# K-MEANS
-# =========================
+    X = df[["Qty","Sales"]]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
-df["KMeans_Cluster"] = kmeans.fit_predict(X_scaled)
+    # KMeans
+    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+    df["KMeans_Cluster"] = kmeans.fit_predict(X_scaled)
 
-# =========================
-# HIERARCHICAL
-# =========================
+    # Hierarchical
+    Z = linkage(X_scaled, method='ward')
+    df["Hierarchical_Cluster"] = fcluster(Z, 3, criterion='maxclust')
 
-Z = linkage(X_scaled, method="ward")
-df["Hierarchical_Cluster"] = fcluster(Z, t=3, criterion="maxclust")
+    # =========================
+    # HASIL
+    # =========================
 
-# =========================
-# PREVIEW DATA (MIN 10 BARIS)
-# =========================
+    st.subheader("✅ HASIL SEGMENTASI PER ARTIKEL")
 
-st.subheader("📌 PREVIEW DATA ASLI (MINIMAL 10 BARIS)")
-st.dataframe(df.head(10), use_container_width=True)
+    st.dataframe(df, use_container_width=True, height=600)
 
-st.write(f"📊 TOTAL DATA: **{len(df)} BARIS TERBACA**")
+    # =========================
+    # RINGKASAN CLUSTER
+    # =========================
 
-# =========================
-# HASIL SEGMENTASI
-# =========================
+    st.subheader("📊 JUMLAH DATA PER CLUSTER")
 
-st.subheader("✅ HASIL SEGMENTASI (FULL DATA + CLUSTER)")
-st.success("Kolom hasil ada di 👉 **KMeans_Cluster** & **Hierarchical_Cluster**")
+    col1, col2 = st.columns(2)
 
-st.dataframe(df, use_container_width=True, height=600)
+    with col1:
+        st.write("KMEANS")
+        st.write(df["KMeans_Cluster"].value_counts().sort_index())
 
-# =========================
-# RINGKASAN
-# =========================
+    with col2:
+        st.write("HIERARCHICAL")
+        st.write(df["Hierarchical_Cluster"].value_counts().sort_index())
 
-st.subheader("📊 RINGKASAN CLUSTER")
+    # =========================
+    # DOWNLOAD
+    # =========================
 
-col1, col2 = st.columns(2)
+    df.to_excel("HASIL_SEGMENTASI.xlsx", index=False)
+    st.success("✅ File berhasil disimpan sebagai: HASIL_SEGMENTASI.xlsx")
 
-with col1:
-    st.write("KMeans")
-    st.write(df["KMeans_Cluster"].value_counts().sort_index())
-
-with col2:
-    st.write("Hierarchical")
-    st.write(df["Hierarchical_Cluster"].value_counts().sort_index())
-
-# =========================
-# SIMPAN FILE
-# =========================
-
-df.to_excel("HASIL_SEGMENTASI.xlsx", index=False)
-st.success("✅ File disimpan sebagai: **HASIL_SEGMENTASI.xlsx**")
-
+else:
+    st.warning("⏳ Upload file Excel dulu...")
 
 
 
