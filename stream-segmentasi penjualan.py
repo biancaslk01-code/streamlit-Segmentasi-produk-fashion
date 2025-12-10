@@ -25,7 +25,7 @@ st.set_page_config(page_title="Segmentasi Produk Fashion", layout="wide")
 st.title("Segmentasi Produk Fashion Berdasarkan Pola Penjualan Bulanan Menggunakan Metode K-Means dan Hierarchical Clustering")
 
 # Funny background / caption
-st.markdown("### ✨✨")
+st.markdown("✨✨")
 st.caption("Katanya tiap produk fashion kalau dikumpulin bareng-bareng jadi klan — ada yang best-seller, ada yang cuma numpang lewat. Kita bantu cari teman seperjuangan supaya toko nggak sepi!")
 
 # Sidebar options
